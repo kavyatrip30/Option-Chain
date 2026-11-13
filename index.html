@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Option Chain Tracker</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1b1b1e; --panel:#232327; --panel2:#2a2a2f; --line:#35353b;
+  --text:#ebe9e4; --muted:#92908b; --accent:#d8a94a;
+  --up:#5fc08a; --down:#e0736b; --itm:rgba(216,169,74,.06);
+  font-family:"IBM Plex Sans",system-ui,sans-serif; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-variant-numeric:tabular-nums}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid var(--line)}
+h1{font-size:18px;font-weight:600;margin:0}
+.ctl{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+select,button{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:inherit;font-size:14px;cursor:pointer}
+select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button:hover{background:var(--panel2)}
+main{max-width:1100px;margin:0 auto;padding:20px 24px 60px}
+.quote{display:flex;flex-wrap:wrap;align-items:baseline;gap:14px;margin-bottom:14px}
+.quote .name{font-size:28px;font-weight:600}
+.quote .spot{font-size:22px}
+.quote .stamp{color:var(--muted);font-size:13px;margin-left:auto}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.chip{border-radius:999px;padding:7px 14px;font-size:14px}
+.chip.on{background:var(--accent);color:#1b1b1e;border-color:var(--accent);font-weight:600}
+.banner{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px 14px;border-radius:8px;color:var(--muted);font-size:13px;margin-bottom:14px;display:none}
+.banner b{color:var(--text)}
+.wrap{border:1px solid var(--line);border-radius:12px;overflow:auto;background:var(--panel)}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
+th{position:sticky;top:0;background:var(--panel2);color:var(--muted);font-weight:500;font-size:13px;padding:10px 12px;text-align:right}
+td{padding:9px 12px;text-align:right;border-top:1px solid var(--line)}
+th.c,td.c{text-align:center}
+td.strike{font-weight:600}
+tr.atm td.strike span{background:var(--text);color:#1b1b1e;border-radius:6px;padding:4px 12px;display:inline-block}
+tr.atm td{background:var(--panel2);border-top:1px solid var(--accent);border-bottom:1px solid var(--accent)}
+td.itm{background:var(--itm)}
+.pct{font-size:12px;margin-left:6px}
+.up{color:var(--up)} .down{color:var(--down)} .mut{color:var(--muted)}
+.bar{position:relative;display:inline-block;min-width:60px}
+.bar i{position:absolute;bottom:-4px;height:2px;background:var(--muted);opacity:.7;right:0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:16px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;text-align:center}
+.stat small{display:block;color:var(--muted);font-size:13px;margin-bottom:4px}
+.stat b{font-size:20px;font-weight:600}
+footer{color:var(--muted);font-size:12px;margin-top:22px;line-height:1.6}
+@media(prefers-reduced-motion:no-preference){.wrap{transition:opacity .2s}.loading{opacity:.5}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Option Chain Tracker</h1>
+  <div class="ctl">
+    <select id="sym" aria-label="Symbol"></select>
+    <select id="win" aria-label="Strikes shown">
+      <option value="6">±6 strikes</option><option value="10" selected>±10 strikes</option>
+      <option value="20">±20 strikes</option><option value="999">All strikes</option>
+    </select>
+    <select id="auto" aria-label="Auto refresh">
+      <option value="30000" selected>Refresh every 30s</option><option value="60000">Every 60s</option><option value="0">Manual</option>
+    </select>
+    <button id="go">Refresh</button>
+  </div>
+</header>
+<main>
+  <div class="quote"><span class="name" id="qn">—</span><span class="spot" id="qs"></span><span class="stamp" id="qt"></span></div>
+  <div class="chips" id="exp"></div>
+  <div class="banner" id="banner"></div>
+  <div class="wrap" id="wrap">
+    <table>
+      <thead><tr>
+        <th>OI chg</th><th>OI</th><th>Call LTP</th><th class="c">Strike</th><th>Put LTP</th><th>OI</th><th>OI chg</th>
+      </tr></thead>
+      <tbody id="tb"><tr><td colspan="7" class="mut c">Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="stats" id="stats"></div>
+  <footer>Data from NSE India, delayed by a few minutes. OI is shown in lakhs of contracts. For information only, not trading advice.</footer>
+</main>
+<script>
+const SYMBOLS = ["NIFTY","BANKNIFTY","FINNIFTY","RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","SBIN","BHARTIARTL","ITC","LT","BPCL","ONGC","AXISBANK","KOTAKBANK","HINDUNILVR","MARUTI","SUNPHARMA","TATAMOTORS","TATASTEEL","WIPRO","BAJFINANCE","M&M","COALINDIA","NTPC","POWERGRID","ADANIENT","ASIANPAINT","HCLTECH"];
+const $ = id => document.getElementById(id);
+let data = null, expiry = null, timer = null;
+
+SYMBOLS.forEach(s => $("sym").add(new Option(s, s)));
+const saved = localStorage.getItem("oc_sym"); if (saved && SYMBOLS.includes(saved)) $("sym").value = saved;
+
+const fmtOI = n => n == null ? "–" : (n / 1e5).toFixed(2);
+const fmtP = n => n == null ? "–" : n.toFixed(2);
+const pc = n => n == null || isNaN(n) ? "" : `<span class="pct ${n>=0?"up":"down"}">${n>=0?"+":""}${n.toFixed(1)}%</span>`;
+
+function demo(symbol) {
+  const base = {NIFTY:25144,BANKNIFTY:56000,FINNIFTY:26500,BPCL:302,RELIANCE:1450,TCS:3200,HDFCBANK:1000}[symbol] || 1000;
+  const step = base > 20000 ? 50 : base > 3000 ? 20 : base > 800 ? 10 : base > 300 ? 5 : 2.5;
+  const atm = Math.round(base / step) * step, rows = [];
+  const exps = ["25-Nov-2026","30-Dec-2026","27-Jan-2027"];
+  let seed = symbol.length * 7;
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  exps.forEach((e, ei) => {
+    for (let i = -25; i <= 25; i++) {
+      const k = atm + i * step, t = 1 + ei * 0.6;
+      const ce = Math.max(base - k, 0) + step * 3 * t * Math.exp(-Math.abs(i) / 8);
+      const pe = Math.max(k - base, 0) + step * 3 * t * Math.exp(-Math.abs(i) / 8);
+      const w = Math.exp(-Math.abs(i) / 9) * 2e6;
+      rows.push({strike:k, expiry:e,
+        ce:{oi:w*(0.4+rnd()), oiPct:(rnd()-0.4)*60, ltp:ce, pct:(rnd()-0.5)*60, iv:25+rnd()*8},
+        pe:{oi:w*(0.4+rnd()), oiPct:(rnd()-0.4)*60, ltp:pe, pct:(rnd()-0.5)*60, iv:25+rnd()*8}});
+    }
+  });
+  return {symbol, spot:base, timestamp:"Demo data", expiries:exps, rows, demo:true};
+}
+
+async function load() {
+  const symbol = $("sym").value;
+  localStorage.setItem("oc_sym", symbol);
+  $("wrap").classList.add("loading");
+  try {
+    const r = await fetch("/api/chain?symbol=" + encodeURIComponent(symbol));
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Request failed");
+    data = j; $("banner").style.display = "none";
+  } catch (e) {
+    data = demo(symbol);
+    const b = $("banner"); b.style.display = "block";
+    b.innerHTML = `<b>Showing demo data.</b> Live NSE data couldn't be loaded (${e.message}). NSE sometimes blocks requests from cloud servers; see README for options.`;
+  }
+  if (!expiry || !data.expiries.includes(expiry)) expiry = data.expiries[0];
+  $("wrap").classList.remove("loading");
+  render();
+}
+
+function render() {
+  if (!data) return;
+  $("qn").textContent = data.symbol;
+  $("qs").textContent = data.spot ? data.spot.toLocaleString("en-IN", {minimumFractionDigits:2}) : "";
+  $("qt").textContent = data.timestamp ? "As of " + data.timestamp : "";
+  const chips = $("exp"); chips.innerHTML = "";
+  const isNov = e => /-Nov-/i.test(e);
+  data.expiries.slice(0, 8).forEach(e => {
+    const b = document.createElement("button");
+    b.className = "chip" + (e === expiry ? " on" : ""); b.textContent = e + (isNov(e) ? " · Nov" : "");
+    b.onclick = () => { expiry = e; render(); };
+    chips.appendChild(b);
+  });
+
+  const all = data.rows.filter(r => r.expiry === expiry).sort((a, b) => a.strike - b.strike);
+  const strikes = all.map(r => r.strike);
+  const atm = strikes.reduce((p, c) => Math.abs(c - data.spot) < Math.abs(p - data.spot) ? c : p, strikes[0]);
+  const idx = strikes.indexOf(atm), n = +$("win").value;
+  const view = all.slice(Math.max(0, idx - n), idx + n + 1);
+  const maxOI = Math.max(...view.flatMap(r => [r.ce?.oi || 0, r.pe?.oi || 0]), 1);
+  const bar = (v, side) => `<span class="bar">${fmtOI(v)}<i style="width:${(v / maxOI * 100) || 0}%;${side}"></i></span>`;
+
+  $("tb").innerHTML = view.map(r => {
+    const c = r.ce || {}, p = r.pe || {}, isAtm = r.strike === atm;
+    const citm = r.strike < data.spot, pitm = r.strike > data.spot;
+    return `<tr class="${isAtm ? "atm" : ""}">
+      <td class="${citm ? "itm" : ""} ${c.oiPct >= 0 ? "up" : "down"}">${c.oiPct == null ? "–" : (c.oiPct >= 0 ? "+" : "") + c.oiPct.toFixed(1) + "%"}</td>
+      <td class="${citm ? "itm" : ""}">${bar(c.oi, "right:0")}</td>
+      <td class="${citm ? "itm" : ""}">${fmtP(c.ltp)}${pc(c.pct)}</td>
+      <td class="strike c"><span>${r.strike}</span></td>
+      <td class="${pitm ? "itm" : ""}">${fmtP(p.ltp)}${pc(p.pct)}</td>
+      <td class="${pitm ? "itm" : ""}">${bar(p.oi, "left:0")}</td>
+      <td class="${pitm ? "itm" : ""} ${p.oiPct >= 0 ? "up" : "down"}">${p.oiPct == null ? "–" : (p.oiPct >= 0 ? "+" : "") + p.oiPct.toFixed(1) + "%"}</td>
+    </tr>`;
+  }).join("");
+
+  // PCR, max pain, ATM IV across the full expiry
+  const cOI = all.reduce((s, r) => s + (r.ce?.oi || 0), 0), pOI = all.reduce((s, r) => s + (r.pe?.oi || 0), 0);
+  let best = null, bestLoss = Infinity;
+  strikes.forEach(k => {
+    const loss = all.reduce((s, r) => s + (r.ce?.oi || 0) * Math.max(k - r.strike, 0) + (r.pe?.oi || 0) * Math.max(r.strike - k, 0), 0);
+    if (loss < bestLoss) { bestLoss = loss; best = k; }
+  });
+  const a = all[idx], ivs = [a?.ce?.iv, a?.pe?.iv].filter(v => v);
+  const atmIV = ivs.length ? (ivs.reduce((x, y) => x + y) / ivs.length).toFixed(2) : "–";
+  const pcr = cOI ? (pOI / cOI).toFixed(2) : "–";
+  const topC = all.reduce((m, r) => (r.ce?.oi || 0) > (m.ce?.oi || 0) ? r : m, all[0]);
+  const topP = all.reduce((m, r) => (r.pe?.oi || 0) > (m.pe?.oi || 0) ? r : m, all[0]);
+  $("stats").innerHTML = [["PCR", pcr], ["Max pain", best ?? "–"], ["ATM IV", atmIV], ["Resistance (top call OI)", topC?.strike ?? "–"], ["Support (top put OI)", topP?.strike ?? "–"]]
+    .map(([l, v]) => `<div class="stat"><small>${l}</small><b>${v}</b></div>`).join("");
+}
+
+function schedule() {
+  clearInterval(timer);
+  const ms = +$("auto").value;
+  if (ms) timer = setInterval(() => !document.hidden && load(), ms);
+}
+$("sym").onchange = () => { expiry = null; load(); };
+$("win").onchange = render;
+$("auto").onchange = schedule;
+$("go").onclick = load;
+load(); schedule();
+</script>
+</body>
+</html>
